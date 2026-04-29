@@ -1,0 +1,32 @@
+name: Coletor de Questões Automático
+
+on:
+  schedule:
+    - cron: '0 0 * * 1' # Roda toda segunda-feira à meia-noite
+  workflow_dispatch:   # Permite que você rode manualmente clicando em um botão
+
+jobs:
+  executar_script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do código
+        uses: actions/checkout@v3
+
+      - name: Configurar Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+
+      - name: Instalar Dependências
+        run: pip install -r requirements.txt
+
+      - name: Rodar o Coletor
+        run: python coletor_provas.py
+
+      - name: Salvar resultados no repositório
+        run: |
+          git config --global user.name "Robo-Educador"
+          git config --global user.email "robo@provas.com"
+          git add .
+          git commit -m "Atualização automática: Banco de Questões [$(date)]" || exit 0
+          git push
