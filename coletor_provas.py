@@ -17,7 +17,7 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ── Configurações ─────────────────────────────────────────────────────────────
-URL_ENEM = "https://raw.githubusercontent.com/prmm-rodrigues/enem-questions/master/data/enem.json"
+URL_ENEM = "[https://raw.githubusercontent.com/dombelini/enem-questions/master/data/enem.json](https://raw.githubusercontent.com/dombelini/enem-questions/master/data/enem.json)"
 URL_UECE_RAIZ = "https://www.cev.uece.br/home/home/concursos-servicos/encerrados/vestibulares/vestibular-uece/"
 BASE_URL_UECE = "https://www.cev.uece.br"
 BANCO_DIR = Path("banco_provas")
