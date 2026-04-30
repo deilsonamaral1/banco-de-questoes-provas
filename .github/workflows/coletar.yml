@@ -1,36 +1,39 @@
 name: Coletor de Questões Automático
 
-# Libera permissão para o robô salvar arquivos no seu repositório
-permissions:
-  contents: write
-
 on:
   schedule:
-    - cron: '0 0 * * 1' # Roda toda segunda-feira à meia-noite
-  workflow_dispatch:   # Permite que você rode manualmente clicando em um botão
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   executar_script:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout do código
-        uses: actions/checkout@v4 # Atualizado para v4 (mais estável)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Configurar Python
-        uses: actions/setup-python@v5 # Atualizado para v5
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
       - name: Instalar Dependências
-        run: pip install -r requirements.txt
+        run: pip install requests beautifulsoup4
 
       - name: Rodar o Coletor
         run: python coletor_provas.py
 
       - name: Salvar resultados no repositório
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config --global user.name "Robo-Educador"
-          git config --global user.email "robo@provas.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "Atualização automática: Banco de Questões [$(date)]" || exit 0
-          git push
+          git commit -m "Banco atualizado automaticamente [$(date)]" || exit 0
+          git push origin main
