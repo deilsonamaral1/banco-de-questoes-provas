@@ -18,14 +18,13 @@ URL_ENEM = "https://raw.githubusercontent.com/dombelini/enem-questions/master/da
 URL_UECE_RAIZ = "https://www.cev.uece.br/home/home/concursos-servicos/encerrados/vestibulares/vestibular-uece/"
 BASE_URL_UECE = "https://www.cev.uece.br"
 BANCO_DIR = Path("banco_provas")
-MAX_PASTAS_UECE = 3 # Reduzido para ser mais rápido no teste
 
-# ── Modelo ────────────────────────────────────────────────────────────────────
+# ── Modelo de Dados ───────────────────────────────────────────────────────────
 @dataclass
 class Questao:
     id_unico: str
     vestibular: str
-    ano: Optional[int]
+    ano: Optional[str]
     disciplina: str
     area: str
     nivel: str
@@ -45,78 +44,112 @@ def salvar_questao(q: Questao) -> bool:
     pasta = BANCO_DIR / q.area / q.vestibular.lower()
     pasta.mkdir(parents=True, exist_ok=True)
     arquivo = pasta / "questoes.json"
-    dados = json.loads(arquivo.read_text(encoding="utf-8")) if arquivo.exists() else []
-    if any(item["id_unico"] == q.id_unico for item in dados): return False
+    
+    dados = []
+    if arquivo.exists():
+        with open(arquivo, 'r', encoding='utf-8') as f:
+            dados = json.load(f)
+            
+    if any(item["id_unico"] == q.id_unico for item in dados):
+        return False
+        
     dados.append(asdict(q))
-    arquivo.write_text(json.dumps(dados, indent=4, ensure_ascii=False), encoding="utf-8")
+    with open(arquivo, 'w', encoding='utf-8') as f:
+        json.dump(dados, f, indent=4, ensure_ascii=False)
     return True
 
-# ── ENEM ──────────────────────────────────────────────────────────────────────
+# ── Processamento ENEM ────────────────────────────────────────────────────────
 def processar_enem():
-    log.info("Puxando questões do ENEM...")
+    log.info("Iniciando captura do ENEM...")
     try:
-        r = requests.get(URL_ENEM, timeout=20)
+        r = requests.get(URL_ENEM, timeout=25)
         r.raise_for_status()
         questoes = r.json()
         inseridas = 0
-        for q in questoes[:100]: # Pegando as 100 primeiras para testar
+        for q in questoes[:100]: # Limite inicial para não sobrecarregar
             disc = q.get("disciplina") or "História"
             area = inferir_area(disc)
             if area == "ciencias_humanas":
                 obj = Questao(
                     id_unico=f"ENEM_{q.get('ano')}_{q.get('id')}",
-                    vestibular="ENEM", ano=q.get("ano"),
-                    disciplina=disc, area=area,
-                    nivel="Médio", enunciado=q.get("enunciado", ""),
+                    vestibular="ENEM",
+                    ano=str(q.get("ano")),
+                    disciplina=disc,
+                    area=area,
+                    nivel="Médio",
+                    enunciado=q.get("enunciado", ""),
                     alternativas=q.get("alternativas"),
                     resposta_correta=q.get("gabarito")
                 )
-                if salvar_questao(obj): inseridas += 1
-        log.info(f"ENEM: {inseridas} questões novas.")
+                if salvar_questao(obj):
+                    inseridas += 1
+        log.info(f"ENEM concluído: {inseridas} novas questões salvas.")
     except Exception as e:
-        log.error(f"Erro no ENEM: {e}")
+        log.error(f"Erro ao processar ENEM: {e}")
 
-# ── UECE (Extração de PDF) ───────────────────────────────────────────────────
-def extrair_texto_uece(url_pdf, disciplina, ano):
+# ── Processamento UECE ────────────────────────────────────────────────────────
+def extrair_texto_pdf(url_pdf, nome_prova):
     try:
         r = requests.get(url_pdf, timeout=30)
-        with open("temp.pdf", "wb") as f: f.write(r.content)
-        doc = fitz.open("temp.pdf")
-        texto_completo = ""
-        for pagina in doc: texto_completo += pagina.get_text()
+        temp_pdf = "temp_uece.pdf"
+        with open(temp_pdf, "wb") as f:
+            f.write(r.content)
+            
+        doc = fitz.open(temp_pdf)
+        texto_acumulado = ""
+        for pagina in doc:
+            texto_acumulado += pagina.get_text()
         doc.close()
+        os.remove(temp_pdf)
         
-        # Lógica simples de quebra: Procura por "1." ou "Questão 01"
-        # Para este MVP, vamos salvar o texto bruto do PDF como uma questão única de referência
+        # Cria um registro da prova no banco (MVP de extração)
         obj = Questao(
-            id_unico=f"UECE_{ano}_{disciplina[:3].upper()}",
-            vestibular="UECE", ano=ano,
-            disciplina=disciplina, area="ciencias_humanas",
-            nivel="Difícil", enunciado=texto_completo[:1000] + "...", # Amostra do texto
-            alternativas=[], resposta_correta="Ver PDF"
+            id_unico=f"UECE_{nome_prova[:10].replace(' ', '_')}",
+            vestibular="UECE",
+            ano="2024", # Pode ser extraído do nome da pasta no futuro
+            disciplina=nome_prova,
+            area="ciencias_humanas",
+            nivel="Difícil",
+            enunciado=texto_acumulado[:1500] + "...", # Amostra do conteúdo
+            alternativas=[],
+            resposta_correta="Consultar PDF Oficial"
         )
         salvar_questao(obj)
+        log.info(f"Sucesso ao processar PDF: {nome_prova}")
     except Exception as e:
-        log.error(f"Erro ao ler PDF UECE: {e}")
+        log.error(f"Erro na extração do PDF UECE: {e}")
 
 def processar_uece():
-    log.info("Mapeando UECE...")
+    log.info("Explorando portal CEV/UECE...")
     try:
-        soup = BeautifulSoup(requests.get(URL_UECE_RAIZ).text, "html.parser")
-        pastas = [a["href"] for a in soup.find_all("a", href=True) if "vestibular" in a["href"].lower()]
-        for url_p in list(set(pastas))[:MAX_PASTAS_UECE]:
-            full_url = url_p if url_p.startswith("http") else BASE_URL_UECE + url_p
-            soup_p = BeautifulSoup(requests.get(full_url).text, "html.parser")
-            for a in soup_p.find_all("a", href=True):
-                nome = a.text.lower()
-                if ".pdf" in a["href"] and ("sociologia" in nome or "história" in nome) and "gabarito 1" in nome:
-                    pdf_url = a["href"] if a["href"].startswith("http") else BASE_URL_UECE + a["href"]
-                    log.info(f"Baixando prova UECE: {nome}")
-                    extrair_texto_uece(pdf_url, nome, "2024") # Ano genérico para teste
+        r = requests.get(URL_UECE_RAIZ)
+        soup = BeautifulSoup(r.text, "html.parser")
+        
+        links_vestibulares = []
+        for a in soup.find_all("a", href=True):
+            if "vestibular" in a["href"].lower():
+                url = a["href"] if a["href"].startswith("http") else BASE_URL_UECE + a["href"]
+                links_vestibulares.append(url)
+        
+        # Analisa as 3 pastas mais recentes
+        for pasta_url in list(set(links_vestibulares))[:3]:
+            log.info(f"Entrando na pasta: {pasta_url}")
+            r_p = requests.get(pasta_url)
+            soup_p = BeautifulSoup(r_p.text, "html.parser")
+            
+            for link_pdf in soup_p.find_all("a", href=True):
+                nome = link_pdf.text.lower()
+                href = link_pdf["href"]
+                # Filtra apenas Gabarito 1 de Sociologia ou História
+                if ".pdf" in href and "gabarito 1" in nome:
+                    if "sociologia" in nome or "história" in nome:
+                        pdf_full_url = href if href.startswith("http") else BASE_URL_UECE + href
+                        extrair_texto_pdf(pdf_full_url, nome)
     except Exception as e:
-        log.error(f"Erro na UECE: {e}")
+        log.error(f"Erro ao navegar na UECE: {e}")
 
+# ── Execução Principal ────────────────────────────────────────────────────────
 if __name__ == "__main__":
     processar_enem()
     processar_uece()
-    log.info("Fim do processo.")
+    log.info("Todos os processos foram finalizados.")
